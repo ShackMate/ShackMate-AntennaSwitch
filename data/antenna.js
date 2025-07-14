@@ -19,12 +19,52 @@
  * Storage is handled by the ESP32 device - no localStorage used.
  */
 
-// Global WebSocket variable
-let ws = null;
+// Global WebSocket variables
+let ws = null; // Main dashboard WebSocket (port 80)
+let remoteWS = null; // For CI-V messages (port 4000, server-side)
+let clientWS = null; // Client WebSocket to connect to remoteWS (port 4000)
 
 // Helper variables
 let rcsType = 1; // default to RCS-10 (shows all 8 buttons)
 let deviceNumber = 1; // default to 1
+// --- Helper: Gather config state for stateUpdate ---
+function getConfigState() {
+    const rcsType = document.querySelector('input[name="rcsType"]:checked') ? parseInt(document.querySelector('input[name="rcsType"]:checked').value) : 0;
+    const deviceNumber = document.getElementById('deviceNumber') ? parseInt(document.getElementById('deviceNumber').value) : 1;
+    const antennaNames = [];
+    for (let i = 1; i <= 8; i++) {
+        const el = document.getElementById('ant' + i);
+        antennaNames.push(el ? el.value : 'Antenna #' + i);
+    }
+    return { rcsType, deviceNumber, antennaNames };
+}
+
+// --- Helper: Send config stateUpdate via WebSocket ---
+function sendConfigStateUpdate() {
+    if (!window.ws || ws.readyState !== WebSocket.OPEN) return;
+    const { rcsType, deviceNumber, antennaNames } = getConfigState();
+    ws.send(JSON.stringify({
+        type: 'stateUpdate',
+        rcsType,
+        deviceNumber,
+        antennaNames
+    }));
+}
+
+// --- Attach event listeners to config fields ---
+window.addEventListener('DOMContentLoaded', function() {
+    // Switch model radio buttons
+    const radios = document.querySelectorAll('input[name="rcsType"]');
+    radios.forEach(r => r.addEventListener('change', sendConfigStateUpdate));
+    // Device number input
+    const devNum = document.getElementById('deviceNumber');
+    if (devNum) devNum.addEventListener('change', sendConfigStateUpdate);
+    // Antenna name inputs
+    for (let i = 1; i <= 8; i++) {
+        const el = document.getElementById('ant' + i);
+        if (el) el.addEventListener('change', sendConfigStateUpdate);
+    }
+});
 
 // Model/Device UI update functions removed - controls are only on config page
 
@@ -120,11 +160,71 @@ function setRcsType(type) {
   updateAntennaButtonVisibility();
 }
 
-// Flag to track if we've received fresh state from server
+
+// State variables must be global for all event handlers
+let antennaState = new Array(8).fill(null).map(() => ({
+  bandPattern: 0,
+  typeIndex: 0,
+  styleIndex: 0,
+  polIndex: 0,
+  mfgIndex: 0,
+  disabled: false
+}));
+let currentAntennaIndex = 0;
+
+// Default 8 names: "Antenna #1" ... "Antenna #8"
+let antennaNames = [
+  "Antenna #1",
+  "Antenna #2",
+  "Antenna #3",
+  "Antenna #4",
+  "Antenna #5",
+  "Antenna #6",
+  "Antenna #7",
+  "Antenna #8"
+];
+
 let hasReceivedFreshState = false;
 let webSocketConnected = false;
 
 document.addEventListener("DOMContentLoaded", function() {
+  // --- Set up remoteWS for CI-V messages (port 4000, server-side) ---
+  const remoteWsUrl = `ws://${window.location.hostname}:4000/remoteWS`;
+  remoteWS = new WebSocket(remoteWsUrl);
+
+  remoteWS.onopen = function() {
+    console.log("Connected to remoteWS (CI-V, server-side) on port 4000.");
+  };
+  remoteWS.onmessage = function(event) {
+    // Handle CI-V messages here if needed
+    console.log("remoteWS message (server-side):", event.data);
+    // You can add custom CI-V message handling logic here
+  };
+  remoteWS.onerror = function(error) {
+    console.error("remoteWS error (server-side):", error);
+  };
+  remoteWS.onclose = function(event) {
+    console.log("remoteWS connection closed (server-side):", event.code, event.reason);
+  };
+
+  // --- Set up clientWS to connect to remoteWS (port 4000, client-side) ---
+  const clientWsUrl = `ws://${window.location.hostname}:4000/remoteWS`;
+  clientWS = new WebSocket(clientWsUrl);
+
+  clientWS.onopen = function() {
+    console.log("Connected to clientWS (client to remoteWS) on port 4000.");
+  };
+  clientWS.onmessage = function(event) {
+    // Handle messages from remoteWS as a client
+    console.log("clientWS message (from remoteWS):", event.data);
+    // Add custom logic for clientWS here if needed
+  };
+  clientWS.onerror = function(error) {
+    console.error("clientWS error:", error);
+  };
+  clientWS.onclose = function(event) {
+    console.log("clientWS connection closed:", event.code, event.reason);
+  };
   console.log("=== DOM CONTENT LOADED ===");
   
   // Reset flags for new page load
@@ -201,8 +301,11 @@ function autoSaveConfig(key, value) {
   xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
   xhr.send(key + "=" + encodeURIComponent(value));
 }
-  // Set up WebSocket connection using the /ws endpoint on port 4000.
-  const wsUrl = `ws://${window.location.hostname}:4000/ws`;
+  // Set up main WebSocket connection using the /ws endpoint on port 80.
+  // Use the same protocol and port as the current page for the WebSocket connection
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsHost = window.location.host; // includes hostname and port if present
+  const wsUrl = `${wsProtocol}//${wsHost}/ws`;
   ws = new WebSocket(wsUrl);
 
   ws.onopen = function() {
@@ -244,27 +347,99 @@ function autoSaveConfig(key, value) {
           console.log("Received data:", data);
           console.log("Current local state - index:", currentAntennaIndex, "rcsType:", rcsType);
           
+          // Update antenna button labels (SVG text) live
           if (data.antennaNames) {
             antennaNames = data.antennaNames.slice(0, 8);
+            document.querySelectorAll('.antenna-button').forEach((btn, idx) => {
+              const textElem = btn.querySelector('text');
+              if (textElem && antennaNames[idx]) {
+                textElem.textContent = antennaNames[idx];
+              }
+            });
+            // Update all antenna name input fields (config/dashboard) robustly
+            for (let i = 1; i <= 8; i++) {
+              // Update all elements with id antX (should only be one, but robust for future)
+              const antInputs = document.querySelectorAll(`#ant${i}`);
+              antInputs.forEach(antInput => {
+                if (antInput.value !== antennaNames[i-1]) {
+                  antInput.value = antennaNames[i-1];
+                }
+              });
+            }
+            // Update antenna names in config state display (index page)
+            for (let i = 1; i <= 8; i++) {
+              const antDisplay = document.getElementById(`displayAnt${i}`);
+              if (antDisplay) {
+                antDisplay.textContent = antennaNames[i-1];
+              }
+            }
             console.log("Updated antenna names:", antennaNames);
           }
+          // Update model (rcsType) live
           if (typeof data.rcsType === "number") {
             const oldRcsType = rcsType;
             rcsType = data.rcsType;
+            // Update hidden input if present
+            const rcsTypeInput = document.getElementById('rcsTypeValue');
+            if (rcsTypeInput) {
+              rcsTypeInput.value = rcsType;
+            }
+            // Update all radio buttons named 'rcsType' (for config UI sync)
+            const radios = document.querySelectorAll('input[name="rcsType"]');
+            radios.forEach(radio => {
+              radio.checked = (parseInt(radio.value) === rcsType);
+            });
+            // Update select dropdown if present
+            const modelSelect = document.getElementById('rcsType');
+            if (modelSelect) {
+              modelSelect.value = rcsType;
+            }
+            // Legacy support for IDs
+            const model8 = document.getElementById('model8') || document.getElementById('modelRCS8');
+            const model10 = document.getElementById('model10') || document.getElementById('modelRCS10');
+            if (model8 && model10) {
+              model8.checked = rcsType === 0;
+              model10.checked = rcsType === 1;
+            }
+            // Update config state display (index page)
+            const rcsTypeDisplay = document.getElementById('displayRcsType');
+            if (rcsTypeDisplay) {
+              rcsTypeDisplay.textContent = (rcsType === 0 ? 'RCS-8' : 'RCS-10');
+            }
             console.log("Received rcsType from server:", rcsType, "(was:", oldRcsType, ")");
-            // Model UI update removed - controls are only on config page
-            // Force visibility update whenever we get rcsType from server
             updateAntennaButtonVisibility();
-            
-            // Add a delayed update to ensure it sticks
             setTimeout(function() {
               console.log("Delayed visibility update after receiving rcsType from server");
               updateAntennaButtonVisibility();
             }, 100);
           }
+          // Update device number live (if a visible element exists)
           if (typeof data.deviceNumber === "number") {
             deviceNumber = data.deviceNumber;
-            // Device UI update removed - controls are only on config page
+            // Update all input fields with id 'deviceNumber'
+            const devNumInputsById = document.querySelectorAll('#deviceNumber');
+            devNumInputsById.forEach(input => {
+              if (input.value != deviceNumber) input.value = deviceNumber;
+            });
+            // Update all inputs named 'deviceNumber' (for config UI sync)
+            const devNumInputs = document.querySelectorAll('input[name="deviceNumber"]');
+            devNumInputs.forEach(input => {
+              if (input.value != deviceNumber) input.value = deviceNumber;
+            });
+            // Update display label/span if present
+            let devNumElem = document.getElementById('deviceNumberDisplay');
+            if (devNumElem) {
+              devNumElem.textContent = `Device #: ${deviceNumber}`;
+            }
+            let devNumLabel = document.getElementById('deviceNumberLabel');
+            if (devNumLabel) {
+              devNumLabel.textContent = deviceNumber;
+            }
+            // Update config state display (index page)
+            const devNumDisplay = document.getElementById('displayDeviceNumber');
+            if (devNumDisplay) {
+              devNumDisplay.textContent = deviceNumber;
+            }
           }
           
           // Always update antenna state and selection, even if state appears equal
@@ -328,32 +503,6 @@ function autoSaveConfig(key, value) {
     webSocketConnected = false;
     hasReceivedFreshState = false;
   };
-
-  /*----------------------------------------------------------------
-    1) State Variables: 10 antenna objects, current antenna index,
-       and antenna names.
-  ----------------------------------------------------------------*/
-  let antennaState = new Array(10).fill(null).map(() => ({
-    bandPattern: 0,
-    typeIndex: 0,
-    styleIndex: 0,
-    polIndex: 0,
-    mfgIndex: 0,
-    disabled: false
-  }));
-  let currentAntennaIndex = 0;
-
-  // Default 8 names: "Antenna #1" ... "Antenna #8"
-  let antennaNames = [
-    "Antenna #1",
-    "Antenna #2",
-    "Antenna #3",
-    "Antenna #4",
-    "Antenna #5",
-    "Antenna #6",
-    "Antenna #7",
-    "Antenna #8"
-  ];
 
   let typeDropdownOpen = false;
 
@@ -776,41 +925,44 @@ function autoSaveConfig(key, value) {
     document.querySelectorAll('.antenna-button').forEach((button, idx) => {
       let holdTimeout = null;
       let holdFired = false;
-      button.addEventListener('mousedown', () => {
-        holdFired = false;
-        holdTimeout = setTimeout(() => {
-          // Toggle disabled state on long press
-          button.classList.toggle('disabled');
-          if (button.classList.contains('disabled')) {
-            button.classList.remove('selected');
-            antennaState[idx].disabled = true;
-          } else {
-            antennaState[idx].disabled = false;
+      // Only attach listeners for the first 8 buttons (idx 0-7)
+      if (idx < 8) {
+        button.addEventListener('mousedown', () => {
+          holdFired = false;
+          holdTimeout = setTimeout(() => {
+            // Toggle disabled state on long press
+            button.classList.toggle('disabled');
+            if (button.classList.contains('disabled')) {
+              button.classList.remove('selected');
+              antennaState[idx].disabled = true;
+            } else {
+              antennaState[idx].disabled = false;
+            }
+            holdFired = true;
+            sendStateUpdate(); // Antenna details auto-saved to ESP device
+            }, 500);
+           });
+        button.addEventListener('mouseleave', () => {
+          if (holdTimeout) {
+            clearTimeout(holdTimeout);
+            holdTimeout = null;
           }
-          holdFired = true;
-          sendStateUpdate(); // Antenna details auto-saved to ESP device
-        }, 500);
-      });
-      button.addEventListener('mouseleave', () => {
-        if (holdTimeout) {
-          clearTimeout(holdTimeout);
-          holdTimeout = null;
-        }
-      });
-      button.addEventListener('mouseup', () => {
-        if (holdTimeout) {
-          clearTimeout(holdTimeout);
-          holdTimeout = null;
-          if (!button.classList.contains('disabled') && !holdFired) {
-            document.querySelectorAll('.antenna-button').forEach(b => b.classList.remove('selected'));
-            button.classList.add('selected');
-            currentAntennaIndex = parseInt(button.dataset.index, 10);
-            refreshUIForAntenna(currentAntennaIndex);
-            updateOptionButtons();
-            sendStateUpdate(); // Send the antenna change to the server
+        });
+        button.addEventListener('mouseup', () => {
+          if (holdTimeout) {
+            clearTimeout(holdTimeout);
+            holdTimeout = null;
+            if (!button.classList.contains('disabled') && !holdFired) {
+              document.querySelectorAll('.antenna-button').forEach(b => b.classList.remove('selected'));
+              button.classList.add('selected');
+              currentAntennaIndex = parseInt(button.dataset.index, 10);
+              refreshUIForAntenna(currentAntennaIndex);
+              updateOptionButtons();
+              sendStateUpdate(); // Send the antenna change to the server
+            }
           }
-        }
-      });
+        });
+      }
     });
 
     // LED circles
@@ -1029,14 +1181,14 @@ window.updateAntennaButtonVisibility = updateAntennaButtonVisibility;
 // Function to reset all antenna details (useful for debugging)
 window.resetAllAntennaDetails = function() {
   console.log("Resetting all antenna details to defaults...");
-  antennaState.forEach(antenna => {
-    antenna.typeIndex = 0;
-    antenna.styleIndex = 0;
-    antenna.polIndex = 0;
-    antenna.mfgIndex = 0;
-    antenna.disabled = false;
-    antenna.bandPattern = 0;
-  });
+  for (let i = 0; i < 8; i++) {
+    antennaState[i].typeIndex = 0;
+    antennaState[i].styleIndex = 0;
+    antennaState[i].polIndex = 0;
+    antennaState[i].mfgIndex = 0;
+    antennaState[i].disabled = false;
+    antennaState[i].bandPattern = 0;
+  }
   updateOptionButtons();
   refreshUIForAntenna(currentAntennaIndex);
   sendStateUpdate(); // Save to ESP device

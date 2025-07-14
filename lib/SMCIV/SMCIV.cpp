@@ -327,18 +327,23 @@ void SMCIV::handleIncomingWsMessage(const String &asciiHex)
     uint8_t cmd = bytes[4];
     uint8_t myAddr = civAddressPtr ? *civAddressPtr : 0xB4;
 
-    if (toAddr == myAddr && fromAddr == myAddr)
+    // Always answer 19 00 requests from broadcast (0x00) or our own address, even if fromAddr == myAddr
+    if (cmd != 0x19 || subcmd != 0x00)
     {
-        Serial.println("[CI-V] Ignored: Both DEST and SRC are my CI-V address, not replying.");
-        return;
+        if (toAddr == myAddr && fromAddr == myAddr)
+        {
+            // Suppress verbose print: Both DEST and SRC are my CI-V address, not replying.
+            return;
+        }
     }
 
     bool isBroadcast = (toAddr == 0x00);
     bool isMine = (toAddr == myAddr);
 
-    // Only process valid addressed/broadcast commands
+    // Only process valid addressed/broadcast commands, but always process 19 00 from broadcast or our address
     if (
-        (cmd == 0x19 && (bytes.size() >= 6) && (bytes[5] == 0x00 || bytes[5] == 0x01) && (isBroadcast || isMine)) ||
+        (cmd == 0x19 && subcmd == 0x00 && (isBroadcast || isMine)) ||
+        (cmd == 0x19 && subcmd == 0x01 && (isBroadcast || isMine)) ||
         (cmd == 0x30 && bytes.size() == 6 && bytes[5] == 0xFD && (isBroadcast || isMine)) ||
         (cmd == 0x31 && bytes.size() == 6 && bytes[5] == 0xFD && (isBroadcast || isMine)) ||
         isMine)
@@ -347,13 +352,13 @@ void SMCIV::handleIncomingWsMessage(const String &asciiHex)
     }
     else
     {
-        Serial.println("[CI-V] Ignored: Not addressed to us or not a valid broadcast read.");
+        // Suppress verbose print: Not addressed to us or not a valid broadcast read.
         return;
     }
 
     uint8_t subcmd = (bytes.size() > 5) ? bytes[5] : 0x00;
 
-    if (cmd == 0x19 && subcmd == 0x01)
+    if (cmd == 0x19 && (subcmd == 0x00 || subcmd == 0x01))
     {
         sendCivResponse(cmd, subcmd, fromAddr);
         return;
