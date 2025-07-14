@@ -40,7 +40,7 @@ WebSocketsClient wsClient;
 
 // --- Project Configuration ---
 #define NAME "ShackMate - Switch (RCS-8/10)"
-#define VERSION "2.0"
+#define VERSION "2.0.1"
 #define MY_MDNS_NAME "shackmate-switch"
 #define MY_UDP_PORT 4210
 #define BUTTON_PIN 41 // AtomS3 Lite physical button
@@ -243,6 +243,14 @@ void onAntennaStateChanged(uint8_t antennaPort, uint8_t receivedRcsType)
   JsonArray antennaStateArray = doc.createNestedArray("antennaState");
   loadAllAntennaDetails(antennaStateArray);
 
+  // Add GPIO status array for UI indicators
+  JsonArray gpioStatus = doc.createNestedArray("gpioStatus");
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_1));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_2));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_3));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_4));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_5));
+
   String jsonStr;
   serializeJson(doc, jsonStr);
 
@@ -301,12 +309,9 @@ void setAntennaOutput(uint8_t antennaIndex)
   // First clear all outputs
   clearAllAntennaOutputs();
 
-  // Get current RCS type from global variable
+  // Only one GPIO is HIGH at a time for antennas 1-5
   if (rcsType == 0) // RCS-8 Mode: Direct GPIO control
   {
-    // RCS-8: antennaIndex 0-4 maps to antennas 1-5
-    // Each antenna gets its own dedicated GPIO pin
-
     switch (antennaIndex)
     {
     case 0: // Antenna 1
@@ -805,13 +810,21 @@ void broadcastCurrentAntennaState()
   doc["deviceNumber"] = configPrefs.getInt("deviceNumber", 1);
   configPrefs.end();
 
+  // Add GPIO status array for UI indicators
+  JsonArray gpioStatus = doc.createNestedArray("gpioStatus");
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_1));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_2));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_3));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_4));
+  gpioStatus.add(digitalRead(ANTENNA_GPIO_5));
+
   String jsonStr;
   serializeJson(doc, jsonStr);
 
   // Broadcast to all connected WebSocket clients
   ws.textAll(jsonStr);
-  Serial.printf("[WS] Broadcasted full state to all clients: %s\n", jsonStr.c_str());
-  Serial.printf("[DEBUG] broadcastCurrentAntennaState() called. currentAntennaIndex=%d, rcsType=%d, deviceNumber=%d\n", currentAntennaIndex, (int)doc["rcsType"], (int)doc["deviceNumber"]);
+  // Serial.printf("[WS] Broadcasted full state to all clients: %s\n", jsonStr.c_str());
+  // Serial.printf("[DEBUG] broadcastCurrentAntennaState() called. currentAntennaIndex=%d, rcsType=%d, deviceNumber=%d\n", currentAntennaIndex, (int)doc["rcsType"], (int)doc["deviceNumber"]);
 }
 
 // -------------------------------------------------------------------------

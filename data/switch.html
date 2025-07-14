@@ -29,10 +29,10 @@
   </style>
 </head>
 <body>
-  <a href="/" class="back-button">← Back to Dashboard</a>
+
   <input type="hidden" id="rcsTypeValue" value="%RCS_TYPE%">
 
-  <div class="content-container">
+  <div class="content-container" style="position:relative;">
     <!-- Main SVG container -->
     <svg width="990" height="525" viewBox="0 0 990 525" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; vertical-align: top;">
       <!-- Outer border -->
@@ -84,62 +84,50 @@
       
       <!-- Left-side antenna button group (8 buttons) -->
       <g id="button-group" transform="translate(10,55)">
-        <g id="btnTransmit" class="function-button" data-index="-1" transform="translate(0,0)">
-          <rect width="130" height="33.5" rx="5" />
-          <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
-            TRANSMIT
-          </text>
-        </g>
-        <g id="btnTuner" class="function-button" data-index="-1" transform="translate(0,39)">
-          <rect width="130" height="33.5" rx="5" />
-          <text id="tunerText" x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
-            TUNER
-          </text>
-        </g>
         <!-- 8 Antenna Buttons using placeholders -->
-        <g id="ant1" class="antenna-button" data-index="0" transform="translate(0,78)">
+        <g id="ant1" class="antenna-button" data-index="0" transform="translate(0,0)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT1%
           </text>
         </g>
-        <g id="ant2" class="antenna-button" data-index="1" transform="translate(0,117)">
+        <g id="ant2" class="antenna-button" data-index="1" transform="translate(0,39)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT2%
           </text>
         </g>
-        <g id="ant3" class="antenna-button" data-index="2" transform="translate(0,156)">
+        <g id="ant3" class="antenna-button" data-index="2" transform="translate(0,78)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT3%
           </text>
         </g>
-        <g id="ant4" class="antenna-button" data-index="3" transform="translate(0,195)">
+        <g id="ant4" class="antenna-button" data-index="3" transform="translate(0,117)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT4%
           </text>
         </g>
-        <g id="ant5" class="antenna-button" data-index="4" transform="translate(0,234)">
+        <g id="ant5" class="antenna-button" data-index="4" transform="translate(0,156)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT5%
           </text>
         </g>
-        <g id="ant6" class="antenna-button" data-index="5" transform="translate(0,273)">
+        <g id="ant6" class="antenna-button" data-index="5" transform="translate(0,195)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT6%
           </text>
         </g>
-        <g id="ant7" class="antenna-button" data-index="6" transform="translate(0,312)">
+        <g id="ant7" class="antenna-button" data-index="6" transform="translate(0,234)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT7%
           </text>
         </g>
-        <g id="ant8" class="antenna-button" data-index="7" transform="translate(0,351)">
+        <g id="ant8" class="antenna-button" data-index="7" transform="translate(0,273)">
           <rect width="130" height="33.5" rx="5" />
           <text x="65" y="16.75" dominant-baseline="middle" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">
             %ANT8%
@@ -165,6 +153,40 @@
           Port -: No Antenna Selected
         </text>
       </g>
+
+    <!-- GPIO Output Indicators (moved inside main window, lower right) -->
+    <div id="gpio-indicators" style="position:absolute; right:40px; bottom:40px; z-index:10; background:rgba(0,0,0,0.85); border-radius:12px; padding:16px 24px 12px 24px; box-shadow:0 2px 12px #000a; border:2px solid #444; min-width:270px;">
+      <div style="color:#fff; font-family:sans-serif; font-size:1.1em; font-weight:600; letter-spacing:0.5px; margin-bottom:10px; text-align:center;">GPIO Output Status</div>
+      <div id="gpio-indicator-row" class="gpio-row-right" style="display:flex; gap:18px;">
+        <div style="display:flex; align-items:center; gap:5px;">
+          <span id="gpio-led-1" class="gpio-led off"></span>
+          <span style="color:#fff; font-size:0.95em;">G5</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:5px;">
+          <span id="gpio-led-2" class="gpio-led off"></span>
+          <span style="color:#fff; font-size:0.95em;">G6</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:5px;">
+          <span id="gpio-led-3" class="gpio-led off"></span>
+          <span style="color:#fff; font-size:0.95em;">G7</span>
+        </div>
+        <div id="gpio-g8" style="display:flex; align-items:center; gap:5px;">
+          <span id="gpio-led-4" class="gpio-led off"></span>
+          <span style="color:#fff; font-size:0.95em;">G8</span>
+        </div>
+        <div id="gpio-g39" style="display:flex; align-items:center; gap:5px;">
+          <span id="gpio-led-5" class="gpio-led off"></span>
+          <span style="color:#fff; font-size:0.95em;">G39</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Back to Dashboard button inside window, lower left, not overlaying sidebar -->
+    <div style="position:absolute; left:0; bottom:0; width:100%; display:flex; justify-content:flex-start; align-items:flex-end; pointer-events:none; z-index:20; height:100%;">
+      <div style="width:340px; height:100%; display:flex; align-items:flex-end; pointer-events:none;">
+        <a href="/" class="back-button" style="margin:0 0 24px 24px; pointer-events:auto; position:static;">← Back to Dashboard</a>
+      </div>
+    </div>
     </svg>
 
     <!-- Option Buttons placed under the LED area -->
@@ -184,6 +206,65 @@
   </div>
   
   <!-- Reference to updated JS file -->
+  <style>
+    #gpio-indicators {
+      pointer-events: none;
+    }
+    .gpio-row-center {
+      justify-content: center !important;
+    }
+    .gpio-row-right {
+      justify-content: flex-end !important;
+    }
+    .gpio-led {
+      display:inline-block;
+      width:18px;
+      height:18px;
+      border-radius:50%;
+      background:#222;
+      border:2px solid #666;
+      box-shadow:0 0 4px #000a;
+      transition:background 0.2s, box-shadow 0.2s;
+      pointer-events: auto;
+    }
+    .gpio-led.on {
+      background:#0f0;
+      box-shadow:0 0 10px #0f08;
+      border-color:#0f0;
+    }
+    .gpio-led.off {
+      background:#222;
+      border-color:#666;
+      box-shadow:0 0 4px #000a;
+    }
+  </style>
+  <script>
+    // Hide G8 & G39 indicators if RCS-10 is selected, and auto-center row for RCS-8
+    function updateGpioIndicatorVisibility(rcsType) {
+      var g8 = document.getElementById('gpio-g8');
+      var g39 = document.getElementById('gpio-g39');
+      var row = document.getElementById('gpio-indicator-row');
+      if (!g8 || !g39 || !row) return;
+      if (rcsType === 1 || rcsType === '1') {
+        g8.style.display = 'none';
+        g39.style.display = 'none';
+        row.classList.remove('gpio-row-right');
+        row.classList.add('gpio-row-center');
+      } else {
+        g8.style.display = '';
+        g39.style.display = '';
+        row.classList.remove('gpio-row-right');
+        row.classList.add('gpio-row-center');
+      }
+    }
+    // Initial check on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      var rcsTypeVal = document.getElementById('rcsTypeValue');
+      updateGpioIndicatorVisibility(rcsTypeVal ? parseInt(rcsTypeVal.value) : 0);
+    });
+    // Listen for rcsType changes from antenna.js
+    window.updateGpioIndicatorVisibility = updateGpioIndicatorVisibility;
+  </script>
   <script src="antenna.js"></script>
 </body>
 </html>

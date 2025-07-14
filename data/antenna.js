@@ -189,6 +189,10 @@ let webSocketConnected = false;
 
 document.addEventListener("DOMContentLoaded", function() {
   // --- Set up remoteWS for CI-V messages (port 4000, server-side) ---
+
+  // Restore original event handling for TRANSMIT, TUNER, and antenna buttons
+  // (This block will be replaced with the original event attachment logic for TRANSMIT, TUNER, and antenna buttons)
+  // ...existing code...
   const remoteWsUrl = `ws://${window.location.hostname}:4000/remoteWS`;
   remoteWS = new WebSocket(remoteWsUrl);
 
@@ -342,6 +346,30 @@ function autoSaveConfig(key, value) {
       try {
         const data = JSON.parse(event.data);
         if (data.type === "stateUpdate") {
+          // --- GPIO Output Indicator Update ---
+          if (Array.isArray(data.gpioStatus) && data.gpioStatus.length === 5) {
+            for (let i = 0; i < 5; i++) {
+              const led = document.getElementById(`gpio-led-${i+1}`);
+              if (led) {
+                if (data.gpioStatus[i]) {
+                  led.classList.add('on');
+                  led.classList.remove('off');
+                } else {
+                  led.classList.remove('on');
+                  led.classList.add('off');
+                }
+                // Diagnostics: log each update
+                console.log(`[DIAG] GPIO LED ${i+1} (${led.id}) set to ${data.gpioStatus[i] ? 'ON' : 'OFF'}`);
+              }
+               else {
+                 console.warn(`[DIAG] GPIO LED element not found: gpio-led-${i+1}`);
+               }
+            }
+          }
+          // --- GPIO Indicator Visibility (hide G8/G39 for RCS-10) ---
+          if (typeof data.rcsType !== 'undefined' && window.updateGpioIndicatorVisibility) {
+            window.updateGpioIndicatorVisibility(data.rcsType);
+          }
           hasReceivedFreshState = true; // Mark that we've received state from server
           console.log("=== RECEIVED STATE UPDATE ===");
           console.log("Received data:", data);
@@ -478,6 +506,7 @@ function autoSaveConfig(key, value) {
             refreshUIForAntenna(currentAntennaIndex);
             updateOptionButtons();
             updateAntennaButtonVisibility();
+            // ...existing code...
             console.log("=== STATE UPDATE COMPLETE ===");
             console.log("Final state - index:", currentAntennaIndex, "rcsType:", rcsType);
           } else {

@@ -326,6 +326,7 @@ void SMCIV::handleIncomingWsMessage(const String &asciiHex)
     uint8_t fromAddr = bytes[3];
     uint8_t cmd = bytes[4];
     uint8_t myAddr = civAddressPtr ? *civAddressPtr : 0xB4;
+    uint8_t subcmd = (bytes.size() > 5) ? bytes[5] : 0x00;
 
     // Always answer 19 00 requests from broadcast (0x00) or our own address, even if fromAddr == myAddr
     if (cmd != 0x19 || subcmd != 0x00)
@@ -355,8 +356,6 @@ void SMCIV::handleIncomingWsMessage(const String &asciiHex)
         // Suppress verbose print: Not addressed to us or not a valid broadcast read.
         return;
     }
-
-    uint8_t subcmd = (bytes.size() > 5) ? bytes[5] : 0x00;
 
     if (cmd == 0x19 && (subcmd == 0x00 || subcmd == 0x01))
     {
