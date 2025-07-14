@@ -2,6 +2,40 @@
 
 **Remote Control System for RCS-8 and RCS-10 Antenna Switches**
 
+## Features
+
+- **Dual Switch Support:**
+  - RCS-8 Mode: Direct GPIO control for 5 antennas (1-5)
+  - RCS-10 Mode: BCD-encoded control for 8 antennas (1-8)
+  - Runtime switchable between modes via web interface
+- **CI-V Integration:**
+  - Full Icom CI-V protocol compatibility
+  - Automatic antenna switching based on radio commands
+  - Configurable CI-V addresses (device numbers 1-4)
+  - Real-time bi-directional communication with transceivers
+- **Modern Web Interface:**
+  - Clean, uncluttered switch control page
+  - TRANSMIT button removed for clarity; TUNER button remains
+  - Antenna selection buttons start at the top of the group
+  - Real-time GPIO Output Indicators (G5, G6, G7, G8, G39) in lower right
+  - Responsive, mobile-friendly design
+- **Live System Monitoring:**
+  - Uptime, memory, and connection status
+  - Visual status indicators (RGB LED)
+- **Network Connectivity:**
+  - WiFi configuration via captive portal
+  - WebSocket-based real-time communication
+  - UDP discovery and mDNS support
+  - OTA firmware updates
+- **Persistent Configuration:**
+  - NVS storage for all settings and antenna names
+  - Auto-save and restore
+- **Easy Installation:**
+  - PlatformIO-based build and upload
+  - Simple web-based setup and configuration
+
+**Remote Control System for RCS-8 and RCS-10 Antenna Switches**
+
 ## Overview
 
 ShackMate Antenna Switch is an ESP32-based remote control system designed to interface with the RCS-8 and RCS-10 antenna switches. It provides both CI-V (Computer Interface V) protocol compatibility for integration with Icom transceivers and a modern web-based control interface for manual operation.
