@@ -251,6 +251,13 @@ void onAntennaStateChanged(uint8_t antennaPort, uint8_t receivedRcsType)
   gpioStatus.add(digitalRead(ANTENNA_GPIO_4));
   gpioStatus.add(digitalRead(ANTENNA_GPIO_5));
 
+  Serial.printf("[DEBUG] CI-V GPIO Status: G%d=%d, G%d=%d, G%d=%d, G%d=%d, G%d=%d\n",
+                ANTENNA_GPIO_1, digitalRead(ANTENNA_GPIO_1),
+                ANTENNA_GPIO_2, digitalRead(ANTENNA_GPIO_2),
+                ANTENNA_GPIO_3, digitalRead(ANTENNA_GPIO_3),
+                ANTENNA_GPIO_4, digitalRead(ANTENNA_GPIO_4),
+                ANTENNA_GPIO_5, digitalRead(ANTENNA_GPIO_5));
+
   String jsonStr;
   serializeJson(doc, jsonStr);
 
@@ -561,6 +568,21 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
     doc["deviceNumber"] = configPrefs.getInt("deviceNumber", 1);
     configPrefs.end();
 
+    // Add GPIO status array for UI indicators
+    JsonArray gpioStatus = doc.createNestedArray("gpioStatus");
+    gpioStatus.add(digitalRead(ANTENNA_GPIO_1));
+    gpioStatus.add(digitalRead(ANTENNA_GPIO_2));
+    gpioStatus.add(digitalRead(ANTENNA_GPIO_3));
+    gpioStatus.add(digitalRead(ANTENNA_GPIO_4));
+    gpioStatus.add(digitalRead(ANTENNA_GPIO_5));
+
+    Serial.printf("[DEBUG] Connect GPIO Status: G%d=%d, G%d=%d, G%d=%d, G%d=%d, G%d=%d\n",
+                  ANTENNA_GPIO_1, digitalRead(ANTENNA_GPIO_1),
+                  ANTENNA_GPIO_2, digitalRead(ANTENNA_GPIO_2),
+                  ANTENNA_GPIO_3, digitalRead(ANTENNA_GPIO_3),
+                  ANTENNA_GPIO_4, digitalRead(ANTENNA_GPIO_4),
+                  ANTENNA_GPIO_5, digitalRead(ANTENNA_GPIO_5));
+
     // Send the state to the newly connected client
     String stateStr;
     serializeJson(doc, stateStr);
@@ -591,128 +613,82 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
 
       if (!err && doc.containsKey("type") && strcmp(doc["type"], "stateUpdate") == 0)
       {
-        // Defensive: Only accept/broadcast state if it is not empty/default
-        bool validState = false;
-        if (doc.containsKey("antennaState") && doc["antennaState"].size() > 0)
+        // Always save antenna details if present - remove restrictive validState logic
+        if (doc.containsKey("antennaState"))
         {
-          // Check for at least one non-default antenna entry
-          JsonArray arr = doc["antennaState"];
-          for (JsonVariant v : arr)
-          {
-            if (v.is<JsonObject>())
-            {
-              JsonObject obj = v.as<JsonObject>();
-              if (obj.containsKey("typeIndex") && obj["typeIndex"] != 0)
-              {
-                validState = true;
-                break;
-              }
-            }
-          }
+          JsonArray antennaStateArray = doc["antennaState"];
+          saveAllAntennaDetails(antennaStateArray);
+          statePrefs.begin("antenna", false);
+          String msg;
+          serializeJson(doc, msg);
+          statePrefs.putString("state", msg);
+          statePrefs.end();
+          Serial.println("[NVS] Saved antennaState to NVS from WebSocket event");
         }
-        // Also check for valid antennaNames or currentAntennaIndex
+        // Save antennaNames to preferences
         if (doc.containsKey("antennaNames"))
         {
+          antennaPrefs.begin("antennaNames", false);
           JsonArray names = doc["antennaNames"].as<JsonArray>();
-          for (JsonVariant n : names)
+          for (int i = 0; i < 8; i++)
           {
-            if (n.is<const char *>() && strlen(n.as<const char *>()) > 0 && strncmp(n.as<const char *>(), "Antenna #", 9) != 0)
-            {
-              validState = true;
-              break;
-            }
+            String key = "ant" + String(i + 1);
+            if (names.size() > i)
+              antennaPrefs.putString(key.c_str(), names[i].as<const char *>());
+          }
+          antennaPrefs.end();
+        }
+        // Save currentAntennaIndex (allow any valid index including 0)
+        if (doc.containsKey("currentAntennaIndex"))
+        {
+          int selectedIndex = doc["currentAntennaIndex"];
+          int maxIndex = (rcsType == 0) ? 4 : 7;
+          if (selectedIndex >= 0 && selectedIndex <= maxIndex)
+          {
+            updatingFromWebSocket = true;
+            smciv.setSelectedAntennaPort(selectedIndex);
+            Serial.printf("[DEBUG] stateUpdate: updating selected antenna port to: %d\n", selectedIndex);
+            Preferences switchPrefs;
+            switchPrefs.begin("switch", false);
+            switchPrefs.putInt("selectedIndex", selectedIndex);
+            switchPrefs.end();
+            setAntennaOutput(selectedIndex);
+            updatingFromWebSocket = false;
           }
         }
-        if (doc.containsKey("currentAntennaIndex") && doc["currentAntennaIndex"] != 0)
+        // Save modelValue and deviceNumber if included
+        configPrefs.begin("config", false);
+        if (doc.containsKey("modelValue"))
         {
-          validState = true;
+          rcsType = doc["modelValue"];
+          configPrefs.putInt("rcs_type", rcsType);
+          smciv.setRcsType(rcsType);
         }
-        // Only save and broadcast if validState is true
-        if (validState)
+        else if (doc.containsKey("rcsType"))
         {
-          // Save antennaState using new NVS-based system
-          if (doc.containsKey("antennaState"))
-          {
-            JsonArray antennaStateArray = doc["antennaState"];
-            saveAllAntennaDetails(antennaStateArray);
-            statePrefs.begin("antenna", false);
-            statePrefs.putString("state", msg);
-            statePrefs.end();
-          }
-          // Save antennaNames to preferences
-          if (doc.containsKey("antennaNames"))
-          {
-            antennaPrefs.begin("antennaNames", false);
-            JsonArray names = doc["antennaNames"].as<JsonArray>();
-            for (int i = 0; i < 8; i++)
-            {
-              String key = "ant" + String(i + 1);
-              if (names.size() > i)
-                antennaPrefs.putString(key.c_str(), names[i].as<const char *>());
-            }
-            antennaPrefs.end();
-          }
-          // Save currentAntennaIndex
-          if (doc.containsKey("currentAntennaIndex"))
-          {
-            int selectedIndex = doc["currentAntennaIndex"];
-            int maxIndex = (rcsType == 0) ? 4 : 7;
-            if (selectedIndex >= 0 && selectedIndex <= maxIndex)
-            {
-              updatingFromWebSocket = true;
-              smciv.setSelectedAntennaPort(selectedIndex);
-              Serial.printf("[DEBUG] stateUpdate: updating selected antenna port to: %d\n", selectedIndex);
-              Preferences switchPrefs;
-              switchPrefs.begin("switch", false);
-              switchPrefs.putInt("selectedIndex", selectedIndex);
-              switchPrefs.end();
-              setAntennaOutput(selectedIndex);
-              updatingFromWebSocket = false;
-            }
-          }
-          // Save modelValue and deviceNumber if included
-          configPrefs.begin("config", false);
-          if (doc.containsKey("modelValue"))
-          {
-            rcsType = doc["modelValue"];
-            configPrefs.putInt("rcs_type", rcsType);
-            smciv.setRcsType(rcsType);
-          }
-          else if (doc.containsKey("rcsType"))
-          {
-            rcsType = doc["rcsType"];
-            configPrefs.putInt("rcs_type", rcsType);
-            smciv.setRcsType(rcsType);
-            configPrefs.end();
-            broadcastCurrentAntennaState();
-            Serial.println("[WS] Broadcasted authoritative state after rcsType change.");
-            return;
-          }
-          if (doc.containsKey("deviceNumber"))
-          {
-            deviceNumber = doc["deviceNumber"];
-            deviceNumber = constrain(deviceNumber, 1, 4);
-            configPrefs.putInt("deviceNumber", deviceNumber);
-            reloadCivAddress();
-            configPrefs.end();
-            broadcastCurrentAntennaState();
-            Serial.println("[WS] Broadcasted authoritative state after deviceNumber change.");
-            return;
-          }
+          rcsType = doc["rcsType"];
+          configPrefs.putInt("rcs_type", rcsType);
+          smciv.setRcsType(rcsType);
           configPrefs.end();
-          // Broadcast the just-received state directly to all clients (if not a model/deviceNumber change)
-          doc["type"] = "stateUpdate";
-          String broadcastStr;
-          serializeJson(doc, broadcastStr);
-          ws.textAll(broadcastStr);
-          Serial.printf("[WS] Broadcasted direct state update to all clients: %s\n", broadcastStr.c_str());
-        }
-        else
-        {
-          // Ignore empty/default stateUpdate; instead, broadcast authoritative state from preferences
           broadcastCurrentAntennaState();
-          Serial.println("[WS] Ignored empty/default stateUpdate from client; sent authoritative state instead.");
+          Serial.println("[WS] Broadcasted authoritative state after rcsType change.");
+          return;
         }
+        if (doc.containsKey("deviceNumber"))
+        {
+          deviceNumber = doc["deviceNumber"];
+          deviceNumber = constrain(deviceNumber, 1, 4);
+          configPrefs.putInt("deviceNumber", deviceNumber);
+          reloadCivAddress();
+          configPrefs.end();
+          broadcastCurrentAntennaState();
+          Serial.println("[WS] Broadcasted authoritative state after deviceNumber change.");
+          return;
+        }
+        configPrefs.end();
+        // Always broadcast authoritative state loaded from NVS after saving
+        broadcastCurrentAntennaState();
+        Serial.println("[WS] Saved and broadcasted authoritative state from NVS after stateUpdate");
       }
 
       // --- Improved DEBUG and antennaChange handling ---
@@ -727,7 +703,13 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         {
           String msgType = doc["type"].as<String>();
 
-          if (msgType == "antennaChange")
+          if (msgType == "requestState")
+          {
+            Serial.println("[DEBUG] requestState received, broadcasting current state");
+            broadcastCurrentAntennaState();
+            return;
+          }
+          else if (msgType == "antennaChange")
           {
             if (doc.containsKey("currentAntennaIndex"))
             {
@@ -817,6 +799,13 @@ void broadcastCurrentAntennaState()
   gpioStatus.add(digitalRead(ANTENNA_GPIO_3));
   gpioStatus.add(digitalRead(ANTENNA_GPIO_4));
   gpioStatus.add(digitalRead(ANTENNA_GPIO_5));
+
+  Serial.printf("[DEBUG] Broadcast GPIO Status: G%d=%d, G%d=%d, G%d=%d, G%d=%d, G%d=%d\n",
+                ANTENNA_GPIO_1, digitalRead(ANTENNA_GPIO_1),
+                ANTENNA_GPIO_2, digitalRead(ANTENNA_GPIO_2),
+                ANTENNA_GPIO_3, digitalRead(ANTENNA_GPIO_3),
+                ANTENNA_GPIO_4, digitalRead(ANTENNA_GPIO_4),
+                ANTENNA_GPIO_5, digitalRead(ANTENNA_GPIO_5));
 
   String jsonStr;
   serializeJson(doc, jsonStr);
@@ -1137,9 +1126,23 @@ void setup()
   udpDiscovery.begin(MY_UDP_PORT);
   Serial.printf("UDP discovery listener started on port %d\n", MY_UDP_PORT);
 
-  // Serve static files from LittleFS.
-  httpServer.serveStatic("/antenna.css", LittleFS, "/antenna.css");
-  httpServer.serveStatic("/antenna.js", LittleFS, "/antenna.js");
+  // Serve static files from LittleFS with cache-busting headers.
+  httpServer.on("/antenna.css", HTTP_GET, [](AsyncWebServerRequest *request)
+                {
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/antenna.css", "text/css");
+    response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    response->addHeader("Pragma", "no-cache");
+    response->addHeader("Expires", "0");
+    request->send(response); });
+
+  httpServer.on("/antenna.js", HTTP_GET, [](AsyncWebServerRequest *request)
+                {
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/antenna.js", "application/javascript");
+    response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    response->addHeader("Pragma", "no-cache");
+    response->addHeader("Expires", "0");
+    request->send(response); });
+
   httpServer.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
 
   ws.onEvent(onWsEvent);
@@ -1566,11 +1569,15 @@ void loadAntennaDetails(int antennaIndex, int *typeIndex, int *styleIndex, int *
 // Save all antenna details from a JSON antennaState array to NVS
 void saveAllAntennaDetails(JsonArray antennaStateArray)
 {
+  Serial.printf("[DEBUG] saveAllAntennaDetails called with %d antennas\n", antennaStateArray.size());
   for (int i = 0; i < antennaStateArray.size() && i < 8; i++)
   {
     JsonObject antenna = antennaStateArray[i];
     if (antenna.isNull())
+    {
+      Serial.printf("[DEBUG] Antenna %d is null, skipping\n", i);
       continue;
+    }
 
     int typeIndex = antenna["typeIndex"] | 0;
     int styleIndex = antenna["styleIndex"] | 0;
@@ -1578,6 +1585,9 @@ void saveAllAntennaDetails(JsonArray antennaStateArray)
     int mfgIndex = antenna["mfgIndex"] | 0;
     int bandPattern = antenna["bandPattern"] | 0;
     bool disabled = antenna["disabled"] | false;
+
+    Serial.printf("[DEBUG] Saving antenna %d: type=%d, style=%d, pol=%d, mfg=%d, bands=%d, disabled=%s\n",
+                  i, typeIndex, styleIndex, polIndex, mfgIndex, bandPattern, disabled ? "true" : "false");
 
     saveAntennaDetails(i, typeIndex, styleIndex, polIndex, mfgIndex, bandPattern, disabled);
   }
@@ -1601,5 +1611,8 @@ void loadAllAntennaDetails(JsonArray antennaStateArray)
     antenna["mfgIndex"] = mfgIndex;
     antenna["bandPattern"] = bandPattern;
     antenna["disabled"] = disabled;
+
+    Serial.printf("[DEBUG] Loaded antenna %d: type=%d, style=%d, pol=%d, mfg=%d, bands=%d, disabled=%s\n",
+                  i, typeIndex, styleIndex, polIndex, mfgIndex, bandPattern, disabled ? "true" : "false");
   }
 }

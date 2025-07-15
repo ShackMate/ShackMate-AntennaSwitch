@@ -1,4 +1,4 @@
-// antenna.js
+// antenna.js - Version 2.1 (Tuner button completely removed)
 
 /*
  * ANTENNA DETAILS PERSISTENCE FEATURE
@@ -190,8 +190,8 @@ let webSocketConnected = false;
 document.addEventListener("DOMContentLoaded", function() {
   // --- Set up remoteWS for CI-V messages (port 4000, server-side) ---
 
-  // Restore original event handling for TRANSMIT, TUNER, and antenna buttons
-  // (This block will be replaced with the original event attachment logic for TRANSMIT, TUNER, and antenna buttons)
+  // Restore original event handling for antenna buttons
+  // (This block will be replaced with the original event attachment logic for antenna buttons)
   // ...existing code...
   const remoteWsUrl = `ws://${window.location.hostname}:4000/remoteWS`;
   remoteWS = new WebSocket(remoteWsUrl);
@@ -347,9 +347,12 @@ function autoSaveConfig(key, value) {
         const data = JSON.parse(event.data);
         if (data.type === "stateUpdate") {
           // --- GPIO Output Indicator Update ---
+          console.log("[DEBUG] Checking gpioStatus in data:", data.gpioStatus);
           if (Array.isArray(data.gpioStatus) && data.gpioStatus.length === 5) {
+            console.log("[DEBUG] Processing GPIO status array:", data.gpioStatus);
             for (let i = 0; i < 5; i++) {
               const led = document.getElementById(`gpio-led-${i+1}`);
+              console.log(`[DEBUG] Looking for GPIO LED: gpio-led-${i+1}, found:`, !!led);
               if (led) {
                 if (data.gpioStatus[i]) {
                   led.classList.add('on');
@@ -359,12 +362,14 @@ function autoSaveConfig(key, value) {
                   led.classList.add('off');
                 }
                 // Diagnostics: log each update
-                console.log(`[DIAG] GPIO LED ${i+1} (${led.id}) set to ${data.gpioStatus[i] ? 'ON' : 'OFF'}`);
+                console.log(`[DIAG] GPIO LED ${i+1} (${led.id}) set to ${data.gpioStatus[i] ? 'ON' : 'OFF'}, classes:`, led.className);
               }
                else {
                  console.warn(`[DIAG] GPIO LED element not found: gpio-led-${i+1}`);
                }
             }
+          } else {
+            console.warn("[DEBUG] Invalid or missing gpioStatus:", data.gpioStatus);
           }
           // --- GPIO Indicator Visibility (hide G8/G39 for RCS-10) ---
           if (typeof data.rcsType !== 'undefined' && window.updateGpioIndicatorVisibility) {
@@ -479,8 +484,16 @@ function autoSaveConfig(key, value) {
           console.log("New antenna index:", data.currentAntennaIndex, "old:", currentAntennaIndex);
           
           if (stateChanged || antennaIndexChanged || !hasReceivedFreshState) {
+            // Store previous antenna state for comparison
+            const prevAntennaState = JSON.stringify(antennaState);
+            const prevCurrentAntennaIndex = currentAntennaIndex;
+            
             antennaState = data.antennaState;
             currentAntennaIndex = data.currentAntennaIndex;
+            
+            console.log("Previous antenna state:", prevAntennaState);
+            console.log("New antenna state:", JSON.stringify(antennaState));
+            console.log("Antenna index changed from", prevCurrentAntennaIndex, "to", currentAntennaIndex);
             
             console.log("Updating antenna selection UI...");
             
@@ -509,8 +522,11 @@ function autoSaveConfig(key, value) {
             // ...existing code...
             console.log("=== STATE UPDATE COMPLETE ===");
             console.log("Final state - index:", currentAntennaIndex, "rcsType:", rcsType);
+            hasReceivedFreshState = true;
           } else {
-            console.log("State unchanged, skipping UI update");
+            console.log("State unchanged, skipping full UI update but updating antenna details");
+            // Even if state appears unchanged, update antenna details in case they changed
+            updateOptionButtonsNoSave();
           }
         } else {
           console.log("Received message:", data);
@@ -579,7 +595,7 @@ function autoSaveConfig(key, value) {
   }
 
   /*----------------------------------------------------------------
-    3) UI Helper Functions for LED, Tuner, and selected antenna label.
+    3) UI Helper Functions for LED and selected antenna label.
   ----------------------------------------------------------------*/
   function updateLEDsFromConfig(index) {
     const pattern = antennaState[index].bandPattern;
@@ -594,16 +610,6 @@ function autoSaveConfig(key, value) {
     });
   }
 
-  function updateTunerButton(index) {
-    const tunerText = document.getElementById('tunerText');
-    if (index === null) {
-      tunerText.style.fill = '#fff';
-      return;
-    }
-    const pattern = antennaState[index].bandPattern;
-    tunerText.style.fill = (pattern & (1 << 14)) ? 'red' : '#fff';
-  }
-
   function updateSelectedAntennaName(index) {
     const nameElem = document.getElementById("selectedAntennaName");
     const portNum = (index !== null) ? (index + 1) : "-";
@@ -616,12 +622,24 @@ function autoSaveConfig(key, value) {
   }
 
   function refreshUIForAntenna(index) {
+    console.log(`refreshUIForAntenna called with index: ${index}`);
+    console.log(`Current antennaState[${index}]:`, antennaState[index]);
+    
     updateLEDsFromConfig(index);
-    updateTunerButton(index);
     updateSelectedAntennaName(index);
-    updateOptionButtons(); // Update antenna details display for selected antenna
+    updateOptionButtonsNoSave(); // Update antenna details display without sending state
     console.log(`Antenna ${index} selected: ${antennaNames[index]}`);
-    sendStateUpdate();
+    
+    // Send antenna change message specifically for antenna selection
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "antennaChange",
+        currentAntennaIndex: index
+      }));
+      console.log("Antenna change sent:", index);
+    }
+    
+    sendStateUpdate(); // Send state update only once at the end
   }
 
   /*----------------------------------------------------------------
@@ -701,7 +719,20 @@ function autoSaveConfig(key, value) {
     5) updateOptionButtons: updates UI and then sends a debounced state update.
   ----------------------------------------------------------------*/
   function updateOptionButtons() {
+    updateOptionButtonsNoSave();
+    // Antenna details are automatically saved to ESP device via sendStateUpdate()
+    sendStateUpdate();
+  }
+
+  function updateOptionButtonsNoSave() {
+    if (currentAntennaIndex === null || !antennaState[currentAntennaIndex]) {
+      console.log("updateOptionButtonsNoSave: No valid antenna selected");
+      return;
+    }
+    
     const st = antennaState[currentAntennaIndex];
+    console.log(`updateOptionButtonsNoSave: Antenna ${currentAntennaIndex} state:`, st);
+    
     let typeStr = stripNumbering(antennaTypes[st.typeIndex]);
     let styleStr = "None";
     let polStr = "None";
@@ -724,13 +755,12 @@ function autoSaveConfig(key, value) {
       }
     }
 
+    console.log(`updateOptionButtonsNoSave: Setting TYPE=${typeStr}, STYLE=${styleStr}, POL=${polStr}, MFG=${mfgStr}`);
+
     document.getElementById("antennaTypeButton").textContent = `TYPE: ${typeStr}`;
     document.getElementById("antennaStyleButton").textContent = `STYLE: ${styleStr}`;
     document.getElementById("antennaPolButton").textContent = `POL: ${polStr}`;
     document.getElementById("antennaMfgButton").textContent = `MFG: ${mfgStr}`;
-
-    // Antenna details are automatically saved to ESP device via sendStateUpdate()
-    sendStateUpdate();
   }
 
   /*----------------------------------------------------------------
@@ -982,12 +1012,12 @@ function autoSaveConfig(key, value) {
             clearTimeout(holdTimeout);
             holdTimeout = null;
             if (!button.classList.contains('disabled') && !holdFired) {
+              // Now switch selection
               document.querySelectorAll('.antenna-button').forEach(b => b.classList.remove('selected'));
               button.classList.add('selected');
               currentAntennaIndex = parseInt(button.dataset.index, 10);
               refreshUIForAntenna(currentAntennaIndex);
-              updateOptionButtons();
-              sendStateUpdate(); // Send the antenna change to the server
+              // Note: refreshUIForAntenna already calls sendStateUpdate()
             }
           }
         });
@@ -1006,22 +1036,6 @@ function autoSaveConfig(key, value) {
         console.log(`Antenna ${currentAntennaIndex} LED pattern: ${st.bandPattern.toString(2).padStart(16, '0')}`);
         sendStateUpdate(); // Antenna details auto-saved to ESP device
       });
-    });
-
-    // Tuner toggle
-    function toggleTuner() {
-      if (currentAntennaIndex === null) return;
-      const antennaBtn = document.querySelector(`.antenna-button[data-index="${currentAntennaIndex}"]`);
-      if (!antennaBtn || antennaBtn.classList.contains('disabled')) return;
-      let st = antennaState[currentAntennaIndex];
-      st.bandPattern ^= (1 << 14);
-      updateTunerButton(currentAntennaIndex);
-      console.log(`Tuner toggled for antenna ${currentAntennaIndex}, pattern: ${st.bandPattern.toString(2).padStart(16, '0')}`);
-      sendStateUpdate(); // Antenna details auto-saved to ESP device
-    }
-    document.getElementById('btnTuner').addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleTuner();
     });
 
     // On initial load, request state from the server.
